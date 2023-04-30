@@ -358,25 +358,26 @@ impl Deserializable for IntermediateAddressExt {
     }
 }
 
-// msg_envelope#4 
-//   cur_addr:IntermediateAddress 
+// msg_envelope#4
+//   cur_addr:IntermediateAddress
 //   next_addr:IntermediateAddress
-//   fwd_fee_remaining:Grams 
-//   msg:^(Message Any) 
-// = MsgEnvelope; 
+//   fwd_fee_remaining:Grams
+//   msg:^(Message Any)
+// = MsgEnvelope;
 #[derive(Clone, Default, Debug, Eq, PartialEq)]
 pub struct MsgEnvelope {
     cur_addr: IntermediateAddress,
     next_addr: IntermediateAddress,
     fwd_fee_remaining: Grams,
     msg: ChildCell<Message>,
+    depth: u32,
 }
 
 impl MsgEnvelope {
     ///
     /// Create Envelope with message and remainig_fee
     ///
-    pub fn with_message_and_fee(msg: &Message, fwd_fee_remaining: Grams) -> Result<Self> {
+    pub fn with_message_and_fee(msg: &Message, fwd_fee_remaining: Grams, depth: u32) -> Result<Self> {
         if !msg.is_internal() {
             fail!("MsgEnvelope can be made only for internal messages")
         }
@@ -384,19 +385,21 @@ impl MsgEnvelope {
             msg.serialize()?,
             fwd_fee_remaining,
             IntermediateAddress::full_dest(),
-            IntermediateAddress::full_dest()
+            IntermediateAddress::full_dest(),
+            depth,
         ))
     }
 
     ///
     /// Create Envelope with message cell and remainig_fee
     ///
-    pub fn with_message_cell_and_fee(msg_cell: Cell, fwd_fee_remaining: Grams) -> Self {
+    pub fn with_message_cell_and_fee(msg_cell: Cell, fwd_fee_remaining: Grams, depth: u32) -> Self {
         Self::with_routing(
             msg_cell,
             fwd_fee_remaining,
             IntermediateAddress::full_dest(),
-            IntermediateAddress::full_dest()
+            IntermediateAddress::full_dest(),
+            depth,
         )
     }
 
@@ -407,14 +410,20 @@ impl MsgEnvelope {
         msg_cell: Cell,
         fwd_fee_remaining: Grams,
         cur_addr: IntermediateAddress,
-        next_addr: IntermediateAddress
+        next_addr: IntermediateAddress,
+        depth: u32,
     ) -> Self {
         MsgEnvelope {
             cur_addr,
             next_addr,
             fwd_fee_remaining,
             msg: ChildCell::with_cell(msg_cell),
+            depth,
         }
+    }
+
+    pub fn depth(&self) -> u32 {
+        self.depth
     }
 
     ///
@@ -422,7 +431,7 @@ impl MsgEnvelope {
     /// TBD
     ///
     #[allow(dead_code)]
-    pub(crate) fn hypercube_routing(msg: &Message, src_shard: &ShardIdent, fwd_fee_remaining: Grams) -> Result<Self> {
+    pub(crate) fn hypercube_routing(msg: &Message, src_shard: &ShardIdent, fwd_fee_remaining: Grams, depth: u32) -> Result<Self> {
         let msg_cell = msg.serialize()?;
         let src = msg.src_ref().ok_or_else(|| error!("source address of message {:x} is invalid", msg_cell.repr_hash()))?;
         let src_prefix = AccountIdPrefixFull::prefix(src)?;
@@ -435,6 +444,7 @@ impl MsgEnvelope {
             next_addr: route_info.1,
             fwd_fee_remaining,
             msg: ChildCell::with_cell(msg_cell),
+            depth,
         })
     }
 
@@ -536,15 +546,25 @@ impl MsgEnvelope {
     }
 }
 
-const MSG_ENVELOPE_TAG : usize = 0x4;
+const MSG_ENVELOPE_TAG_V1 : usize = 0x4;
+const MSG_ENVELOPE_TAG_V2 : usize = 0x5;
 
 impl Serializable for MsgEnvelope {
     fn write_to(&self, cell: &mut BuilderData) -> Result<()> {
-        cell.append_bits(MSG_ENVELOPE_TAG, 4)?;
+        let has_depth = self.depth != 0;
+        let tag = if has_depth {
+            MSG_ENVELOPE_TAG_V1
+        } else {
+            MSG_ENVELOPE_TAG_V2
+        };
+        cell.append_bits(tag, 4)?;
         self.cur_addr.write_to(cell)?;
         self.next_addr.write_to(cell)?;
         self.fwd_fee_remaining.write_to(cell)?;
         cell.checked_append_reference(self.msg.cell())?;
+        if has_depth {
+            self.depth.write_to(cell)?;
+        }
         Ok(())
     }
 }
@@ -552,18 +572,25 @@ impl Serializable for MsgEnvelope {
 impl Deserializable for MsgEnvelope {
     fn read_from(&mut self, cell: &mut SliceData) -> Result<()>{
         let tag = cell.get_next_int(4)? as usize;
-        if tag != MSG_ENVELOPE_TAG {
-            fail!(
-                BlockError::InvalidConstructorTag {
-                    t: tag as u32,
-                    s: "MsgEnvelope".to_string()
-                }
-            )
-        }
+        let has_depth = match tag {
+            MSG_ENVELOPE_TAG_V1 => false,
+            MSG_ENVELOPE_TAG_V2 => true,
+            _ => {
+                fail!(
+                    BlockError::InvalidConstructorTag {
+                        t: tag as u32,
+                        s: "MsgEnvelope".to_string()
+                    }
+                )
+            }
+        };
         self.cur_addr.read_from(cell)?;
         self.next_addr.read_from(cell)?;
         self.fwd_fee_remaining.read_from(cell)?;
         self.msg.read_from_reference(cell)?;
+        if has_depth {
+            self.depth.read_from(cell)?;
+        }
         Ok(())
     }
 }

@@ -553,9 +553,9 @@ impl Serializable for MsgEnvelope {
     fn write_to(&self, cell: &mut BuilderData) -> Result<()> {
         let has_depth = self.depth != 0;
         let tag = if has_depth {
-            MSG_ENVELOPE_TAG_V1
-        } else {
             MSG_ENVELOPE_TAG_V2
+        } else {
+            MSG_ENVELOPE_TAG_V1
         };
         cell.append_bits(tag, 4)?;
         self.cur_addr.write_to(cell)?;

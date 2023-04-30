@@ -342,6 +342,13 @@ impl ConfigParams {
             _ =>  fail!("wrong config 44 (suspended addresses)")
         }
     }
+    pub fn transaction_tree_limits(&self) -> Result<Option<TransactionTreeLimitParams>> {
+        match self.config(50)? {
+            Some(ConfigParamEnum::ConfigParam50(ConfigParam50 { tree_limit })) => Ok(Some(tree_limit)),
+            None => Ok(None),
+            _ =>  fail!("wrong config 50 (transaction tree limits)")
+        }
+    }
     // TODO 39 validator signed temp keys
 }
 
@@ -3322,8 +3329,7 @@ pub(crate) fn dump_config(params: &HashmapE) {
 ///
 #[derive(Clone, Debug, Eq, PartialEq, Default)]
 pub struct ConfigParam50 {
-    pub max_depth: u32,
-    pub track_width: bool,
+    pub tree_limit: TransactionTreeLimitParams,
 }
 
 impl ConfigParam50 {
@@ -3334,16 +3340,22 @@ impl ConfigParam50 {
 
 impl Deserializable for ConfigParam50 {
     fn read_from(&mut self, cell: &mut SliceData) -> Result<()> {
-        self.max_depth.read_from(cell)?;
-        self.track_width.read_from(cell)?;
+        self.tree_limit.max_depth.read_from(cell)?;
+        self.tree_limit.track_width.read_from(cell)?;
         Ok(())
     }
 }
 
 impl Serializable for ConfigParam50 {
     fn write_to(&self, cell: &mut BuilderData) -> Result<()> {
-        self.max_depth.write_to(cell)?;
-        self.track_width.write_to(cell)?;
+        self.tree_limit.max_depth.write_to(cell)?;
+        self.tree_limit.track_width.write_to(cell)?;
         Ok(())
     }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Default)]
+pub struct TransactionTreeLimitParams {
+    pub max_depth: u32,
+    pub track_width: bool,
 }

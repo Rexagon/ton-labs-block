@@ -389,6 +389,7 @@ pub enum GlobalCapabilities {
     CapGroth16                = 0x1000_0000,
     CapFeeInGasUnits          = 0x2000_0000, // all fees in config are in gas units
     CapSuspendedList          = 0x8000_0000,
+    CapTrackTxTreeDepth       = 0x10000_0000, // track tx tree depth
 }
 
 impl ConfigParams {

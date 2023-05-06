@@ -342,9 +342,9 @@ impl ConfigParams {
             _ =>  fail!("wrong config 44 (suspended addresses)")
         }
     }
-    pub fn transaction_tree_limits(&self) -> Result<Option<TransactionTreeLimitParams>> {
+    pub fn transaction_tree_limits(&self) -> Result<Option<TransactionTreeLimits>> {
         match self.config(50)? {
-            Some(ConfigParamEnum::ConfigParam50(ConfigParam50 { tree_limit })) => Ok(Some(tree_limit)),
+            Some(ConfigParamEnum::ConfigParam50(ConfigParam50 { tree_limits })) => Ok(Some(tree_limits)),
             None => Ok(None),
             _ =>  fail!("wrong config 50 (transaction tree limits)")
         }
@@ -389,7 +389,7 @@ pub enum GlobalCapabilities {
     CapGroth16                = 0x1000_0000,
     CapFeeInGasUnits          = 0x2000_0000, // all fees in config are in gas units
     CapSuspendedList          = 0x8000_0000,
-    CapTrackTxTreeDepth       = 0x10000_0000, // track tx tree depth
+    CapTrackTxTreeStats       = 0x10000_0000, // track tx tree depth
 }
 
 impl ConfigParams {
@@ -3330,7 +3330,7 @@ pub(crate) fn dump_config(params: &HashmapE) {
 ///
 #[derive(Clone, Debug, Eq, PartialEq, Default)]
 pub struct ConfigParam50 {
-    pub tree_limit: TransactionTreeLimitParams,
+    pub tree_limits: TransactionTreeLimits,
 }
 
 impl ConfigParam50 {
@@ -3341,22 +3341,25 @@ impl ConfigParam50 {
 
 impl Deserializable for ConfigParam50 {
     fn read_from(&mut self, cell: &mut SliceData) -> Result<()> {
-        self.tree_limit.max_depth.read_from(cell)?;
-        self.tree_limit.track_width.read_from(cell)?;
+        self.tree_limits.max_depth.read_from(cell)?;
+        self.tree_limits.max_cumulative_width.read_from(cell)?;
+        self.tree_limits.width_multiplier.read_from(cell)?;
         Ok(())
     }
 }
 
 impl Serializable for ConfigParam50 {
     fn write_to(&self, cell: &mut BuilderData) -> Result<()> {
-        self.tree_limit.max_depth.write_to(cell)?;
-        self.tree_limit.track_width.write_to(cell)?;
+        self.tree_limits.max_depth.write_to(cell)?;
+        self.tree_limits.max_cumulative_width.write_to(cell)?;
+        self.tree_limits.width_multiplier.write_to(cell)?;
         Ok(())
     }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Default)]
-pub struct TransactionTreeLimitParams {
+pub struct TransactionTreeLimits {
     pub max_depth: u32,
-    pub track_width: bool,
+    pub max_cumulative_width: u32,
+    pub width_multiplier: u32,
 }

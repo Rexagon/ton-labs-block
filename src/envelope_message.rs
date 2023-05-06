@@ -364,20 +364,32 @@ impl Deserializable for IntermediateAddressExt {
 //   fwd_fee_remaining:Grams
 //   msg:^(Message Any)
 // = MsgEnvelope;
+//
+// msg_envelope#5
+//   cur_addr:IntermediateAddress
+//   next_addr:IntermediateAddress
+//   fwd_fee_remaining:Grams
+//   msg:^(Message Any)
+//   tx_tree_stats:TransactionTreeStats
+// = MsgEnvelope;
 #[derive(Clone, Default, Debug, Eq, PartialEq)]
 pub struct MsgEnvelope {
     cur_addr: IntermediateAddress,
     next_addr: IntermediateAddress,
     fwd_fee_remaining: Grams,
     msg: ChildCell<Message>,
-    depth: u32,
+    tx_tree_stats: Option<TransactionTreeStats>,
 }
 
 impl MsgEnvelope {
     ///
     /// Create Envelope with message and remainig_fee
     ///
-    pub fn with_message_and_fee(msg: &Message, fwd_fee_remaining: Grams, depth: u32) -> Result<Self> {
+    pub fn with_message_and_fee(
+        msg: &Message,
+        fwd_fee_remaining: Grams,
+        tx_tree_stats: Option<TransactionTreeStats>,
+    ) -> Result<Self> {
         if !msg.is_internal() {
             fail!("MsgEnvelope can be made only for internal messages")
         }
@@ -386,20 +398,24 @@ impl MsgEnvelope {
             fwd_fee_remaining,
             IntermediateAddress::full_dest(),
             IntermediateAddress::full_dest(),
-            depth,
+            tx_tree_stats,
         ))
     }
 
     ///
     /// Create Envelope with message cell and remainig_fee
     ///
-    pub fn with_message_cell_and_fee(msg_cell: Cell, fwd_fee_remaining: Grams, depth: u32) -> Self {
+    pub fn with_message_cell_and_fee(
+        msg_cell: Cell,
+        fwd_fee_remaining: Grams,
+        tx_tree_stats: Option<TransactionTreeStats>,
+    ) -> Self {
         Self::with_routing(
             msg_cell,
             fwd_fee_remaining,
             IntermediateAddress::full_dest(),
             IntermediateAddress::full_dest(),
-            depth,
+            tx_tree_stats,
         )
     }
 
@@ -411,19 +427,19 @@ impl MsgEnvelope {
         fwd_fee_remaining: Grams,
         cur_addr: IntermediateAddress,
         next_addr: IntermediateAddress,
-        depth: u32,
+        tx_tree_stats: Option<TransactionTreeStats>,
     ) -> Self {
         MsgEnvelope {
             cur_addr,
             next_addr,
             fwd_fee_remaining,
             msg: ChildCell::with_cell(msg_cell),
-            depth,
+            tx_tree_stats,
         }
     }
 
-    pub fn depth(&self) -> u32 {
-        self.depth
+    pub fn tx_tree_stats(&self) -> &Option<TransactionTreeStats> {
+        &self.tx_tree_stats
     }
 
     ///
@@ -431,7 +447,12 @@ impl MsgEnvelope {
     /// TBD
     ///
     #[allow(dead_code)]
-    pub(crate) fn hypercube_routing(msg: &Message, src_shard: &ShardIdent, fwd_fee_remaining: Grams, depth: u32) -> Result<Self> {
+    pub(crate) fn hypercube_routing(
+        msg: &Message,
+        src_shard: &ShardIdent,
+        fwd_fee_remaining: Grams,
+        tx_tree_stats: Option<TransactionTreeStats>,
+    ) -> Result<Self> {
         let msg_cell = msg.serialize()?;
         let src = msg.src_ref().ok_or_else(|| error!("source address of message {:x} is invalid", msg_cell.repr_hash()))?;
         let src_prefix = AccountIdPrefixFull::prefix(src)?;
@@ -444,7 +465,7 @@ impl MsgEnvelope {
             next_addr: route_info.1,
             fwd_fee_remaining,
             msg: ChildCell::with_cell(msg_cell),
-            depth,
+            tx_tree_stats,
         })
     }
 
@@ -551,8 +572,8 @@ const MSG_ENVELOPE_TAG_V2 : usize = 0x5;
 
 impl Serializable for MsgEnvelope {
     fn write_to(&self, cell: &mut BuilderData) -> Result<()> {
-        let has_depth = self.depth != 0;
-        let tag = if has_depth {
+        let has_tx_tree_stats = self.tx_tree_stats.is_some();
+        let tag = if has_tx_tree_stats {
             MSG_ENVELOPE_TAG_V2
         } else {
             MSG_ENVELOPE_TAG_V1
@@ -562,8 +583,8 @@ impl Serializable for MsgEnvelope {
         self.next_addr.write_to(cell)?;
         self.fwd_fee_remaining.write_to(cell)?;
         cell.checked_append_reference(self.msg.cell())?;
-        if has_depth {
-            self.depth.write_to(cell)?;
+        if let Some(tx_tree_stats) = &self.tx_tree_stats {
+            tx_tree_stats.write_to(cell)?;
         }
         Ok(())
     }
@@ -572,7 +593,7 @@ impl Serializable for MsgEnvelope {
 impl Deserializable for MsgEnvelope {
     fn read_from(&mut self, cell: &mut SliceData) -> Result<()>{
         let tag = cell.get_next_int(4)? as usize;
-        let has_depth = match tag {
+        let has_tx_tree_stats = match tag {
             MSG_ENVELOPE_TAG_V1 => false,
             MSG_ENVELOPE_TAG_V2 => true,
             _ => {
@@ -588,9 +609,45 @@ impl Deserializable for MsgEnvelope {
         self.next_addr.read_from(cell)?;
         self.fwd_fee_remaining.read_from(cell)?;
         self.msg.read_from_reference(cell)?;
-        if has_depth {
-            self.depth.read_from(cell)?;
+        if has_tx_tree_stats {
+            let mut tx_tree_stats = TransactionTreeStats::default();
+            tx_tree_stats.read_from(cell)?;
+            self.tx_tree_stats = Some(tx_tree_stats);
         }
+        Ok(())
+    }
+}
+
+const TX_TREE_STATS_TAG: usize = 0x1;
+
+#[derive(Clone, Default, Debug, Eq, PartialEq)]
+pub struct TransactionTreeStats {
+    pub depth: u32,
+    pub cumulative_width: u32,
+}
+
+impl Serializable for TransactionTreeStats {
+    fn write_to(&self, cell: &mut BuilderData) -> Result<()> {
+        cell.append_bits(TX_TREE_STATS_TAG, 4)?;
+        self.depth.write_to(cell)?;
+        self.cumulative_width.write_to(cell)?;
+        Ok(())
+    }
+}
+
+impl Deserializable for TransactionTreeStats {
+    fn read_from(&mut self, cell: &mut SliceData) -> Result<()>{
+        let tag = cell.get_next_int(4)? as usize;
+        if tag != TX_TREE_STATS_TAG {
+            fail!(
+                BlockError::InvalidConstructorTag {
+                    t: tag as u32,
+                    s: "TransactionTreeStats".to_string()
+                }
+            )
+        }
+        self.depth.read_from(cell)?;
+        self.cumulative_width.read_from(cell)?;
         Ok(())
     }
 }
